@@ -1178,21 +1178,20 @@ Always run some side effect action:
 ```
 "})
 
- (or (lazy#) [])]
-           (each [
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; lazy ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-                  (fn realize-fn []
-                    `(fn [t# lazy#]
-                       (let [mt# (getmetatable t#)]
-                         (when (not mt#.__realized)
-                           (let [realized# (or (lazy#) [])]
-                             (each [i# v# (ipairs realized#)]
-                               (rawset t# i# v#))
-                             (set mt#.__realized true)))
-                         t#)))
+(fn realize-fn []
+  `(fn [t# lazy#]
+     (let [mt# (getmetatable t#)]
+       (when (not mt#.__realized)
+         (let [realized# (or (lazy#) [])]
+           (each [i# v# (ipairs (,(seq-fn) realized#))]
+             (rawset t# i# v#))
+           (set mt#.__realized true)))
+       t#)))
 
-(fn lazy-vec [...]
+(fn lazy-seq [...]
   `(let [lazy# (fn [] ,...)]
      (setmetatable
       []
@@ -1225,7 +1224,7 @@ Always run some side effect action:
  : defmethod
  : def
  : defonce
- : lazy-vec
+ : lazy-seq
  : time
  :_VERSION #"0.4.0"
  :_LICENSE #"[MIT](https://gitlab.com/andreyorst/fennel-cljlib/-/raw/master/LICENSE)"

@@ -52,7 +52,7 @@ non-ASCII strings."})
 (local insert table.insert)
 (local _unpack (or table.unpack _G.unpack))
 (import-macros {: fn* : into : empty : with-meta
-                : when-let : if-let : when-some : if-some : lazy-vec}
+                : when-let : if-let : when-some : if-some : lazy-seq}
                (.. (if (and ... (not= ... :init)) (.. ... ".") "") :macros))
 
 
@@ -592,6 +592,26 @@ See [`hash-map`](#hash-map) for creating empty associative tables."
            to))
   ([x y & xs]
    (apply concat (concat x y) xs)))
+
+(fn* core.concat
+  "Returns a lazy seq representing the concatenation of the elements in the supplied colls."
+  ([] (lazy-seq nil))
+  ([x] (lazy-seq x))
+  ([x y]
+   (lazy-seq
+    (let [s (seq x)]
+      (if s
+          (cons (first s) (concat (rest s) y))
+          y))))
+  ([x y & zs]
+   (let [cat (fn cat [xys zs]
+               (lazy-seq
+                (let [xys (seq xys)]
+                  (if xys
+                      (cons (first xys) (cat (rest xys) zs))
+                      (when zs
+                        (cat (first zs) (next zs)))))))]
+     (cat (concat x y) zs))))
 
 (fn* core.reduce
   "Reduce collection `col` using function `f` and optional initial value `val`.
@@ -1307,15 +1327,16 @@ syntax. Use `hash-set` function instead."
 (local set-doc-order
        [:ordered-set :hash-set])
 
-(fn* core.range ([] (range 0)) ([n] (lazy-vec (concat [n] (range (inc n))))))
+(fn* core.lazy-range ([] (range 0)) ([n] (lazy-seq (concat [n] (range (inc n))))))
 
 (fn* core.take [n coll]
-  (lazy-vec
+  (lazy-seq
    (when (pos-int? n)
      (when-let [s (seq coll)]
        (cons (first s) (take (dec n) (rest s)))))))
 
 (fn* core.sleep [n]
+  (assert (>= n 0) "sleep: expected positive number")
   (let [clock os.clock now (clock) end (+ now (/ n 1000))]
     (while (< (clock) end) nil)))
 
