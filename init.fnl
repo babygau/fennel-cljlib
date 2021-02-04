@@ -52,7 +52,7 @@ non-ASCII strings."})
 (local insert table.insert)
 (local _unpack (or table.unpack _G.unpack))
 (import-macros {: fn* : into : empty : with-meta
-                : when-let : if-let : when-some : if-some}
+                : when-let : if-let : when-some : if-some : lazy-vec}
                (.. (if (and ... (not= ... :init)) (.. ... ".") "") :macros))
 
 
@@ -936,18 +936,13 @@ arguments to results and, when calls with the same arguments are
 repeated often, has higher performance at the expense of higher memory
 use."
   [f]
-  (let [memo (setmetatable {} {:__index
-                               (fn [tbl key]
-                                 (each [k v (pairs tbl)]
-                                   (when (eq k key)
-                                     (lua "return v"))))})]
-    (fn [...]
-      (let [args [...]]
-        (if-some [res (. memo args)]
-          res
-          (let [res (f ...)]
-            (tset memo args res)
-            res))))))
+  (let [memo (setmetatable {} {:__index deep-index})]
+    (fn* [& args]
+      (if-some [res (. memo args)]
+        res
+        (let [res (f ...)]
+          (tset memo args res)
+          res)))))
 
 (local function-manipulation-doc-order
        [:identity :comp :complement :constantly :memoize])
@@ -1096,7 +1091,7 @@ default."
                         (view v inspector (+ indent set-indent) true)))]
         (tset lines 1 (.. prefix (or (. lines 1) "")))
         (tset lines (length lines) (.. (. lines (length lines)) "}"))
-        (values lines (> (length lines) inspector.sequential-length)))))
+        lines)))
 
 (fn ordered-set-newindex [Set]
   "`__newindex` metamethod for ordered-set."
@@ -1131,7 +1126,7 @@ default."
 (fn set-eq [s1 s2]
   "`__eq` metamethod for set data structure."
   (var [size res] [0 true])
-  (each [i k (pairs s1)]
+  (each [_ k (pairs s1)]
     (set size (+ size 1))
     (if res (set res (. s2 k))
         (lua :break)))
@@ -1312,6 +1307,17 @@ syntax. Use `hash-set` function instead."
 (local set-doc-order
        [:ordered-set :hash-set])
 
+(fn* core.range ([] (range 0)) ([n] (lazy-vec (concat [n] (range (inc n))))))
+
+(fn* core.take [n coll]
+  (lazy-vec
+   (when (pos-int? n)
+     (when-let [s (seq coll)]
+       (cons (first s) (take (dec n) (rest s)))))))
+
+(fn* core.sleep [n]
+  (let [clock os.clock now (clock) end (+ now (/ n 1000))]
+    (while (< (clock) end) nil)))
 
 (doto core
   (tset :_DOC_ORDER (concat utility-doc-order

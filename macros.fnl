@@ -1178,6 +1178,37 @@ Always run some side effect action:
 ```
 "})
 
+ (or (lazy#) [])]
+           (each [
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; lazy ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+                  (fn realize-fn []
+                    `(fn [t# lazy#]
+                       (let [mt# (getmetatable t#)]
+                         (when (not mt#.__realized)
+                           (let [realized# (or (lazy#) [])]
+                             (each [i# v# (ipairs realized#)]
+                               (rawset t# i# v#))
+                             (set mt#.__realized true)))
+                         t#)))
+
+(fn lazy-vec [...]
+  `(let [lazy# (fn [] ,...)]
+     (setmetatable
+      []
+      {:__realized nil
+       :cljlib/next #(next (,(realize-fn) $1 lazy#) $2)
+       :cljlib/type :lazy-seq
+       :__len #(rawlen (,(realize-fn) $1 lazy#))
+       :__index #(. (,(realize-fn) $1 lazy#) $2)
+       :__pairs #(values next (,(realize-fn) $1 lazy#) nil)
+       :__ipairs #(values next (,(realize-fn) $1 lazy#) nil)
+       :__newindex #(rawset (,(realize-fn) $1 lazy#) $2 $3)})))
+
+(fn time [expr]
+  `(let [c# os.clock s# (c#) r# ,expr e# (c#)]
+     (print (.. "Elapsed " (* 1000 (- e# s#)) " ms"))
+     r#))
 
 {: fn*
  : try
@@ -1194,6 +1225,8 @@ Always run some side effect action:
  : defmethod
  : def
  : defonce
+ : lazy-vec
+ : time
  :_VERSION #"0.4.0"
  :_LICENSE #"[MIT](https://gitlab.com/andreyorst/fennel-cljlib/-/raw/master/LICENSE)"
  :_COPYRIGHT #"Copyright (C) 2020 Andrey Orst"
