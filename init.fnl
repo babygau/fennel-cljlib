@@ -175,8 +175,9 @@ Applying `add' to different amount of arguments:
   "Check whether `tbl' is an associative table.
 
 Non empty associative tables are tested for two things:
-- `next' returns the key-value pair,
-- key, that is returned by the `next' is not equal to `1`.
+
+- Length is equal to zero,
+- Key, that is returned by the `next' is not `nil`.
 
 Empty tables can't be analyzed with this method, and `map?' will
 return `false'.  If you need this test pass for empty table, see
@@ -208,18 +209,19 @@ Empty tables created with `hash-map' will pass the test:
 ```"
   [tbl]
   (if (= (type tbl) :table)
-      (if-let [t (fast-table-type tbl)]
-        (= t :table)
-        (let [(k _) (next tbl)]
-          (and (not= k nil)
-               (not= k 1))))))
+      (match (fast-table-type tbl)
+        :table (= 0 (length tbl))
+        _ (and (= 0 (length tbl))
+               (not= nil (next tbl))))
+      false))
 
 (fn* core.vector?
   "Check whether `tbl' is an sequential table.
 
 Non empty sequential tables are tested for two things:
-- `next' returns the key-value pair,
-- key, that is returned by the `next' is equal to `1`.
+
+- Length of the table is greater than zero,
+- There's nothing after the last integer key in the table.
 
 Empty tables can't be analyzed with this method, and `vector?' will
 always return `false'.  If you need this test pass for empty table,
@@ -251,10 +253,14 @@ Empty tables created with `vector' will pass the test:
 ```"
   [tbl]
   (if (= (type tbl) :table)
-      (if-let [t (fast-table-type tbl)]
-        (= t :seq)
-        (let [(k _) (next tbl)]
-          (and (not= k nil) (= k 1))))))
+      (let [len (length tbl)]
+        (match (fast-table-type tbl)
+          :seq (if (> len 0)
+                   (= nil (next tbl (length tbl)))
+                   (= nil (next tbl)))
+          _ (and (> len 0)
+                 (= nil (next tbl len)))))
+    false))
 
 (fn* core.multifn?
   "Test if `mf' is an instance of `multifn'.
@@ -420,25 +426,21 @@ Additionally you can use `conj' and `apply' with
   [col]
   (let [res (empty [])]
     (match (type col)
-      :table (let [m (or (getmetatable col) {})]
-               (when-some [_ ((or m.cljlib/next next) col)]
-                 (var assoc? false)
-                 (let [assoc-res (empty [])]
-                   (each [k v (pairs col)]
-                     (if (and (not assoc?)
-                              (map? col))
-                         (set assoc? true))
-                     (insert res v)
-                     (insert assoc-res [k v]))
-                   (if assoc? assoc-res res))))
+      :table (let [m (or (getmetatable col) {})
+                   len (length col)]
+               (if (and (> len 0)
+                        (= nil ((pairs col) col len)))
+                   (do (each [_ v (pairs col)] (insert res v))
+                       res)
+                   (not= nil ((pairs col) col))
+                   (do (each [k v (pairs col)] (insert res [k v]))
+                       res)))
       :string (if _G.utf8
                   (let [char _G.utf8.char]
                     (each [_ b (_G.utf8.codes col)]
                       (insert res (char b)))
                     res)
-                  (do (io.stderr:write
-                       "WARNING: utf8 module unavailable, seq function will not work for non-unicode strings\n")
-                      (each [b (col:gmatch ".")]
+                  (do (each [b (col:gmatch ".")]
                         (insert res b))
                       res))
       :nil nil
@@ -450,7 +452,7 @@ Additionally you can use `conj' and `apply' with
   (let [res (empty [])]
     (match (type col)
       :table (let [m (or (getmetatable col) {})]
-               (when-some [_ ((or m.cljlib/next next) col)]
+               (when-some [_ ((pairs col) col)]
                  (each [k v (pairs col)]
                    (insert res [k v]))
                  res))
@@ -459,9 +461,7 @@ Additionally you can use `conj' and `apply' with
                     (each [i b (_G.utf8.codes col)]
                       (insert res [i (char b)]))
                     res)
-                  (do (io.stderr:write
-                       "WARNING: utf8 module unavailable, seq function will not work for non-unicode strings\n")
-                      (for [i 1 (length col)]
+                  (do (for [i 1 (length col)]
                         (insert res [i (col:sub i i)]))
                       res))
       :nil nil
@@ -1232,13 +1232,17 @@ Updates order of all items when some key removed from set."
 (fn ordered-set-pairs [Set]
   "Returns stateless `ipairs' iterator for ordered sets."
   (fn []
-    (var i 0)
+    (print "======")
+    (var i nil)
     (var iseq nil)
-    (fn set-next [t _]
+    (fn set-next [t k]
+      (when (= :number (type k))
+        (set i k))
       (when (not iseq)
         (set iseq (set->iseq Set)))
-      (set i (+ i 1))
-      (let [v (. iseq i)]
+      (print i ((require :fennel.view) iseq))
+      (let [(k v) (next iseq i)]
+        (set i k)
         (values v v)))
     (values set-next Set nil)))
 
@@ -1349,7 +1353,6 @@ same size:
         (set i (+ 1 i))))
     (setmetatable {}
                   {:cljlib/type :cljlib/ordered-set
-                   :cljlib/next #(next Set $2)
                    :cljlib/into into-set
                    :cljlib/empty #(ordered-set)
                    :__eq set-eq
@@ -1358,6 +1361,7 @@ same size:
                    :__index #(if (. Set $2) $2 nil)
                    :__newindex (ordered-set-newindex Set)
                    :__pairs set-pairs
+                   :__ipairs set-pairs
                    :__name "ordered set"
                    :__fennelview viewset})))
 
@@ -1384,7 +1388,6 @@ syntax. Use `hash-set' function instead."
         (tset Set val true)))
     (setmetatable {}
                   {:cljlib/type :cljlib/hash-set
-                   :cljlib/next #(next Set $2)
                    :cljlib/into into-set
                    :cljlib/empty #(hash-set)
                    :__eq set-eq
@@ -1393,6 +1396,7 @@ syntax. Use `hash-set' function instead."
                    :__index #(if (. Set $2) $2 nil)
                    :__newindex (hash-set-newindex Set)
                    :__pairs set-pairs
+                   :__ipairs set-pairs
                    :__name "hash set"
                    :__fennelview viewset})))
 

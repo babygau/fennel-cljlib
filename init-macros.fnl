@@ -112,7 +112,7 @@
                                       t# (. m# :cljlib/type)]
                                   (if t#
                                       (= t# :table)
-                                      (let [(k# _#) ((or m#.cljlib/next next) col#)]
+                                      (let [(k# _#) ((pairs col#) col#)]
                                         (and (not= k# nil)
                                              (not= k# 1)))))))
                        (set assoc?# true))
@@ -140,7 +140,7 @@
            (let [meta# (or (getmetatable tbl#) {})
                  table-type# (. meta# :cljlib/type)]
              (if table-type# table-type#
-                 (let [(k# _#) ((or meta#.cljlib/next next) tbl#)]
+                 (let [(k# _#) ((pairs tbl#) tbl#)]
                    (if (and (= (type k#) :number) (= k# 1)) :seq
                        (= k# nil) :empty
                        :table))))
