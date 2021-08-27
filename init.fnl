@@ -53,9 +53,7 @@ non-ASCII strings."})
 (local _unpack (or table.unpack _G.unpack))
 
 (import-macros {: defn : into : empty
-                : when-let : if-let : when-some : if-some}
-               (if (and ... (not= ... :init)) (.. ... :.init-macros) :init-macros))
-
+                : when-let : if-let : when-some : if-some} :cljlib.macros)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; Utility functions ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -170,6 +168,41 @@ Applying `add' to different amount of arguments:
 
 (fn fast-table-type [tbl]
   (-?> tbl getmetatable (. :cljlib/type)))
+
+;;;; Shadow clone from @datwaft
+(defn core.fn? [obj]
+  "Returns true if the object is a function
+  This only works at compilation time"
+  (and
+    (list? obj)
+    (or
+      (= (tostring (first obj)) :hashfn)
+      (= (tostring (first obj)) :fn))))
+;;;; end of jutsu
+
+;;;; Shadow clone from bulb  
+(defn core.callable? [x]
+  "Is `x` callable? Returns true for functions and anything with a `__call`
+  metamethod."
+  (or (= :function (type x))
+      (and (-?> (getmetatable x) (. :__call)) true)
+      false))
+
+(defn core.hash? [x]
+  "Is `x` a hash table? Returns true for non-empty tables with a nil first item
+  that are not callable."
+  (and (= :table (type x))
+       (= nil (. x 1))
+       (not= nil (next x))
+       (not (callable? x))))
+
+(defn core.hash-or-empty? [x]
+  "Is `x` a hash table or an empty table? Returns true for tables with a nil
+  first item that are not callable."
+  (and (= :table (type x))
+       (= nil (. x 1))
+       (not (callable? x))))
+;;;; end of jutsu
 
 (defn core.map?
   "Check whether `tbl' is an associative table.
@@ -363,7 +396,7 @@ Number is rounded with `math.floor' and compared with original number."
       x))
 
 (local predicate-doc-order
-       [:map? :vector? :multifn? :set? :nil? :zero? :pos?
+       [:map? :vector? :callable? :fn? :multifn? :set? :nil? :zero? :pos?
         :neg? :even? :odd? :string? :boolean? :true? :false?
         :int? :pos-int? :neg-int? :double? :empty? :not-empty])
 
@@ -467,6 +500,22 @@ Additionally you can use `conj' and `apply' with
       :nil nil
       _ (error (.. "expected table, string or nil, got " (type col)) 2))))
 
+;;;; Shadow clone from `core.aniseed`
+(defn core.count [xs]
+  (if
+    (map? xs) (table.maxn xs)
+    (not xs) 0
+    (length xs)))
+
+(defn core.run! [f xs]
+  "Execute the function (for side effects) for every xs."
+  (when xs
+    (let [nxs (count xs)]
+      (when (> nxs 0)
+        (for [i 1 nxs]
+          (f (. xs i)))))))
+;;;; end of jutsu
+
 (defn core.first
   "Return first element of a table. Calls `seq' on its argument."
   [col]
@@ -500,6 +549,15 @@ Additionally you can use `conj' and `apply' with
     (table.remove col (length col))
     (when (not (empty? col))
       col)))
+
+(defn core.contains? [tbl x]
+  ;; Checks if `x' is stored in `tbl' in linear time.
+  (var res false)
+  (each [i v (ipairs tbl)]
+    (if (= v x)
+        (do (set res i)
+            (lua :break))))
+  res)
 
 (defn core.conj
   "Insert `x' as a last element of a table `tbl'.
@@ -917,8 +975,8 @@ Additional padding can be used to supply insufficient elements:
      nil)))
 
 (local sequence-doc-order
-       [:vector :seq :kvseq :first :rest :last :butlast
-        :conj :disj :cons :concat :reduce :reduced :reduce-kv
+       [:vector :seq :kvseq :count :run! :first :rest :last :butlast
+        :contains? :conj :disj :cons :concat :reduce :reduced :reduce-kv
         :mapv :filter :every? :some :not-any? :range :reverse :take
         :nthrest :partition])
 
@@ -1120,8 +1178,68 @@ found in the table."
   ([tbl key & keys]
    (apply dissoc (dissoc tbl key) keys)))
 
+;;;; Shadow clone from `bulb`
+(defn core.merge! [tbl & rest]
+  "Merges any number of other tables into `tbl`, in place. Ignores nils."
+    (for [i 1 (select "#" (_unpack rest))]
+      (match (. rest i)
+        other (each [k v (pairs other)]
+                (tset tbl k v))))
+    tbl)
+
+(defn core.merge [& rest]
+  "Like [[merge!]] but returns a new table."
+  (apply merge! {} rest))
+
+(defn core.merge-with! [f tbl & rest]
+  "Merges any number of other tables into `tbl`, in place. When the same key
+  exists in two tables, calls (f left right) and uses the result. Ignores
+  nils."
+  (let [others rest]
+    (for [i 1 (select "#" (_unpack rest))]
+      (match (. others i)
+        other (each [k v (pairs other)]
+                (tset tbl k
+                      (match (. tbl k)
+                        oldv (f oldv v)
+                        _ v))))))
+  tbl)
+
+(defn core.merge-with [f & rest]
+  "Like [[merge-with!]] but returns a new table."
+  (apply merge-with! f {} rest))
+
+(fn deep-merge-helper [merge-fn f a b]
+  (if (and (hash-or-empty? a) (hash-or-empty? b))
+    (merge-fn f a b)
+    (f a b)))
+
+(defn core.deep-merge-with! [f & rest]
+  "Merges any number of nested hash tables, recursively, in place. When the
+  same key exists in two tables, and the values are not both hash tables, calls
+  (f left right) and uses the result. Ignores nils."
+  (apply merge-with! (fn [a b] (deep-merge-helper deep-merge-with! f a b)) rest))
+
+(defn core.deep-merge-with [f & rest]
+  "Like [[deep-merge-with]], but returns a new table."
+  (apply merge-with (fn [a b] (deep-merge-helper deep-merge-with f a b)) rest))
+
+(fn second-arg [_ b] b)
+
+(defn core.deep-merge! [& rest]
+  "Merges any number of nested hash tables, recursively, in place. Overwrites
+  array tables instead of merging them. Ignores nils."
+  (apply deep-merge-with! second-arg rest))
+
+(defn core.deep-merge [& rest]
+  "Like [[deep-merge!]] but returns a new table."
+  (apply deep-merge-with second-arg rest))
+;;;; end of shadow clone jutsu
+
 (local hash-table-doc-order
-       [:assoc :hash-map :get :get-in :keys :vals :find :dissoc])
+       [:assoc :hash-map :get :get-in :keys :vals :find :dissoc :merge :merge!
+        :merge-with :merge-with! :deep-merge :deep-merge! :deep-merge-with
+        :deep-merge-with!])
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; Multimethods ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
