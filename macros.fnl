@@ -48,7 +48,7 @@
                            (table? (first bindings)))
                        "expected symbol, sequence or table as binding." bindings)))
 
-(local fennel (require :fennel))
+(local fennel (require :aniseed.deps.fennel))
 
 (fn attach-meta [value meta]
   (each [k v (pairs meta)]
